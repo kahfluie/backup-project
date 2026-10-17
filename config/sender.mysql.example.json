@@ -1,0 +1,58 @@
+{
+  "backup_dir": "/backups",
+  "defaults": {
+    "interval_hours": 12,
+    "keep": 3,
+    "compression_level": 6,
+    "retry_seconds": 300
+  },
+  "remote": {
+    "enabled": true,
+    "host": "backup.example.com",
+    "port": 2222,
+    "user": "backup",
+    "directory": "/uploads",
+    "receipts_directory": "/receipts",
+    "acceptance_timeout_seconds": 300,
+    "identity_file": "/run/secrets/backup_key",
+    "known_hosts_file": "/run/secrets/known_hosts",
+    "bandwidth_kib_per_second": 1024,
+    "transfer_timeout_seconds": 86400
+  },
+  "folders": [
+    {
+      "id": "folder1",
+      "path": "/sources/folder1",
+      "interval_hours": 12,
+      "keep": 3,
+      "remote": {
+        "bandwidth_kib_per_second": 1024
+      }
+    },
+    {
+      "id": "folder2",
+      "path": "/sources/folder2",
+      "interval_hours": 24,
+      "keep": 5,
+      "remote": {
+        "bandwidth_kib_per_second": 512
+      }
+    },
+    {
+      "id": "folder3",
+      "path": "/sources/folder3",
+      "interval_hours": 12,
+      "keep": 3,
+      "remote": {
+        "bandwidth_kib_per_second": 1024
+      }
+    },
+    {
+      "id": "mysql",
+      "path": "/sources/mysql",
+      "interval_hours": 12,
+      "keep": 3,
+      "compression_level": 0
+    }
+  ]
+}

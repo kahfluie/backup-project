@@ -1,0 +1,85 @@
+name: folder-backup-sender
+services:
+  sender:
+    extends:
+      file: compose.sender.yml
+      service: sender
+    depends_on:
+      mysql-backup:
+        condition: service_healthy
+    environment:
+      MYSQL_KEEP: ${MYSQL_KEEP:-3}
+      MYSQL_INTERVAL_HOURS: ${MYSQL_INTERVAL_HOURS:-12}
+      MYSQL_BANDWIDTH_KIB_PER_SECOND: ${MYSQL_BANDWIDTH_KIB_PER_SECOND:-1024}
+    volumes:
+      - type: bind
+        source: ./config/sender.mysql.json
+        target: /config/sender.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: mysql_dumps
+        target: /sources/mysql
+        read_only: true
+        volume:
+          subpath: ready
+
+  mysql-backup:
+    image: databack/mysql-backup:1.5.0
+    # Initialize the shared dump volume and make its completed dumps readable.
+    user: "0:0"
+    restart: unless-stopped
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DB_SERVER: ${MYSQL_HOST:-host.docker.internal}
+      DB_PORT: ${MYSQL_PORT:-3306}
+      DB_USER: ${MYSQL_USER:?Set MYSQL_USER in your environment file}
+      DB_PASS: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in your environment file}
+      DB_DUMP_INCLUDE: ${MYSQL_DATABASES:-}
+      DB_DUMP_TARGET: /mysql-state/target
+      DB_DUMP_FREQUENCY: ${MYSQL_DUMP_FREQUENCY_MINUTES:-720}
+      DB_DUMP_COMPRESSION: gzip
+      DB_DUMP_SAFECHARS: "true"
+      DB_DUMP_TRIGGERS: "true"
+      DB_DUMP_ROUTINES: "true"
+      DB_DUMP_RETENTION: ${MYSQL_DUMP_KEEP:-3}c
+      DB_DUMP_POST_BACKUP_SCRIPTS: /tmp/mysql-post-backup
+      MYSQL_DUMP_KEEP: ${MYSQL_DUMP_KEEP:-3}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /mysql-state/ready /mysql-state/target /tmp/mysql-post-backup
+        cp /config/publish-mysql-dump.sh /tmp/mysql-post-backup/publish.sh
+        chmod 700 /tmp/mysql-post-backup/publish.sh
+        exec /entrypoint dump
+    volumes:
+      - mysql_dumps:/mysql-state
+      - type: bind
+        source: ./scripts/publish-mysql-dump.sh
+        target: /config/publish-mysql-dump.sh
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "find /mysql-state/ready -maxdepth 1 -name 'db_backup_*.tgz' -type f | grep -q ."]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+# Service-level extends does not inherit these top-level definitions.
+secrets:
+  backup_key:
+    file: ./secrets/backup_ed25519
+  known_hosts:
+    file: ./secrets/known_hosts
+volumes:
+  mysql_dumps:

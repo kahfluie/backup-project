@@ -1,0 +1,23 @@
+Port 22
+ListenAddress 0.0.0.0
+HostKey /host-keys/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+UsePAM no
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+Include /run/backupkit-allow-users.conf
+DisableForwarding yes
+PermitTTY no
+PermitUserRC no
+X11Forwarding no
+StrictModes yes
+LogLevel VERBOSE
+Subsystem sftp internal-sftp
+
+Match User backup,backup_*
+    ChrootDirectory /srv/inboxes/%u
+    ForceCommand internal-sftp -d /uploads -u 0077 -P symlink,hardlink

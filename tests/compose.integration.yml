@@ -1,0 +1,43 @@
+name: ${TEST_PROJECT:-backupkit-test}
+services:
+  receiver:
+    image: ${TEST_PROJECT:-backupkit-test}-receiver
+    environment:
+      PYTHONPATH: /app
+    build:
+      context: ..
+      dockerfile: receiver/Dockerfile
+    volumes:
+      - ${TEST_DIR}/receiver.json:/config/receiver.json:ro
+      - ${TEST_DIR}/authorized_keys:/run/secrets/authorized_keys:ro
+      - ${TEST_DIR}/authorized_other_keys:/run/secrets/authorized_other_keys:ro
+      - remote_backups:/backups
+      - sender_inboxes:/srv/inboxes
+      - host_keys:/host-keys
+      - receiver_state:/state
+      - ./security_probe.py:/tests/security_probe.py:ro
+  sender:
+    image: ${TEST_PROJECT:-backupkit-test}-sender
+    build:
+      context: ..
+      dockerfile: sender/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    environment:
+      PYTHONPATH: /app
+      DISABLED_PATH: none
+    volumes:
+      - ${TEST_DIR}/sender.json:/config/sender.json:ro
+      - ${TEST_DIR}/source:/sources:ro
+      - ${TEST_DIR}/backup_key:/run/secrets/backup_key:ro
+      - ${TEST_DIR}/other_key:/run/secrets/other_key:ro
+      - ${TEST_DIR}/known_hosts:/run/secrets/known_hosts:ro
+      - local_backups:/backups
+      - ./security_probe.py:/tests/security_probe.py:ro
+volumes:
+  remote_backups:
+  local_backups:
+  host_keys:
+  receiver_state:
+  sender_inboxes:

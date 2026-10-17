@@ -1,0 +1,67 @@
+name: folder-backup-sender
+services:
+  sender:
+    image: kahfluie/backupkit-sender:latest
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      FOLDER1_PATH: ${FOLDER1_PATH:-./sample-data/folder1}
+      FOLDER1_KEEP: ${FOLDER1_KEEP:-}
+      FOLDER1_INTERVAL_HOURS: ${FOLDER1_INTERVAL_HOURS:-}
+      FOLDER1_BANDWIDTH_KIB_PER_SECOND: ${FOLDER1_BANDWIDTH_KIB_PER_SECOND:-}
+      FOLDER2_PATH: ${FOLDER2_PATH:-./sample-data/folder2}
+      FOLDER2_KEEP: ${FOLDER2_KEEP:-}
+      FOLDER2_INTERVAL_HOURS: ${FOLDER2_INTERVAL_HOURS:-}
+      FOLDER2_BANDWIDTH_KIB_PER_SECOND: ${FOLDER2_BANDWIDTH_KIB_PER_SECOND:-}
+      FOLDER3_PATH: ${FOLDER3_PATH:-./sample-data/folder3}
+      FOLDER3_KEEP: ${FOLDER3_KEEP:-}
+      FOLDER3_INTERVAL_HOURS: ${FOLDER3_INTERVAL_HOURS:-}
+      FOLDER3_BANDWIDTH_KIB_PER_SECOND: ${FOLDER3_BANDWIDTH_KIB_PER_SECOND:-}
+    volumes:
+      - type: bind
+        source: ./config/sender.json
+        target: /config/sender.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LOCAL_BACKUP_PATH:-./data/local-backups}
+        target: /backups
+      # Add one read-only mount per selected source folder.
+      - type: bind
+        source: ${FOLDER1_PATH:-./sample-data/folder1}
+        target: /sources/folder1
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FOLDER2_PATH:-./sample-data/folder2}
+        target: /sources/folder2
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FOLDER3_PATH:-./sample-data/folder3}
+        target: /sources/folder3
+        read_only: true
+        bind:
+          create_host_path: false
+    secrets:
+      - backup_key
+      - known_hosts
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+secrets:
+  backup_key:
+    file: ./secrets/backup_ed25519
+  known_hosts:
+    file: ./secrets/known_hosts

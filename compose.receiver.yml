@@ -1,0 +1,35 @@
+name: folder-backup-receiver
+services:
+  receiver:
+    image: kahfluie/backupkit-receiver:latest
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${SSH_BIND_ADDRESS:-0.0.0.0}:${SSH_PORT:-2222}:22"
+    volumes:
+      - type: bind
+        source: ./config/receiver.json
+        target: /config/receiver.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${REMOTE_BACKUP_PATH:-./data/remote-backups}
+        target: /backups
+      - sender_inboxes:/srv/inboxes
+      - host_keys:/host-keys
+      - receiver_state:/state
+    secrets:
+      - authorized_keys
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+secrets:
+  authorized_keys:
+    file: ./secrets/authorized_keys
+volumes:
+  host_keys:
+  receiver_state:
+  sender_inboxes:

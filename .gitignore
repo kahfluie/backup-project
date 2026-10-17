@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env*.example
+config/sender.json
+config/sender.mysql.json
+config/receiver.json
+secrets/
+data/
+sample-data/
+.tools/

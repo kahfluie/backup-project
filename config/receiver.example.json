@@ -1,0 +1,20 @@
+{
+  "backup_dir": "/backups",
+  "default_keep": 3,
+  "check_interval_hours": 24,
+  "stale_partial_hours": 168,
+  "minimum_retention_hours": 168,
+  "publish_interval_seconds": 2,
+  "senders": {
+    "backup": {
+      "authorized_keys_file": "/run/secrets/authorized_keys",
+      "folders": ["folder1", "folder2", "folder3", "mysql"]
+    }
+  },
+  "max_total_backups": null,
+  "folders": {
+    "folder1": {"keep": 3},
+    "folder2": {"keep": 5},
+    "folder3": {"keep": 3}
+  }
+}
