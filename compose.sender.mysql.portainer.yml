@@ -1,0 +1,128 @@
+# Paste this complete file into a Portainer Docker Standalone stack.
+# Local backups of one host folder plus MySQL; no repository files or SSH keys needed.
+name: folder-backup-sender
+services:
+  sender:
+    image: kahfluie/backupkit-sender:latest
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      mysql-backup:
+        condition: service_healthy
+    environment:
+      SEND_TO_REMOTE: ${SEND_TO_REMOTE:-false}
+      FOLDER1_PATH: ${FOLDER1_PATH:?Set FOLDER1_PATH to an existing absolute host directory}
+      FOLDER1_KEEP: ${FOLDER1_KEEP:-3}
+      FOLDER1_INTERVAL_HOURS: ${FOLDER1_INTERVAL_HOURS:-12}
+      MYSQL_KEEP: ${MYSQL_KEEP:-3}
+      MYSQL_INTERVAL_HOURS: ${MYSQL_INTERVAL_HOURS:-12}
+    # Write configuration inside the container instead of binding a host JSON file.
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import os
+        from backupkit.common import send_to_remote_enabled, write_json
+
+        if send_to_remote_enabled(os.environ):
+            raise SystemExit("This Portainer example requires SEND_TO_REMOTE=false; use the sender launcher for remote transfers")
+        write_json("/tmp/sender.json", {
+            "backup_dir": "/backups",
+            "remote": {"enabled": False},
+            "folders": [
+                {"id": "folder1", "path": "/sources/folder1"},
+                {"id": "mysql", "path": "/sources/mysql", "compression_level": 0}
+            ]
+        })
+        os.execvp("python", ["python", "-m", "backupkit.sender", "--config", "/tmp/sender.json"])
+    volumes:
+      - type: bind
+        source: ${LOCAL_BACKUP_PATH:?Set LOCAL_BACKUP_PATH to an absolute host backup directory}
+        target: /backups
+      - type: bind
+        source: ${FOLDER1_PATH:?Set FOLDER1_PATH to an existing absolute host directory}
+        target: /sources/folder1
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: mysql_dumps
+        target: /sources/mysql
+        read_only: true
+        volume:
+          subpath: ready
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  mysql-backup:
+    image: databack/mysql-backup:1.5.0
+    user: "0:0"
+    restart: unless-stopped
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DB_SERVER: ${MYSQL_HOST:-host.docker.internal}
+      DB_PORT: ${MYSQL_PORT:-3306}
+      DB_USER: ${MYSQL_USER:?Set MYSQL_USER in your stack environment}
+      DB_PASS: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in your stack environment}
+      DB_DUMP_INCLUDE: ${MYSQL_DATABASES:-}
+      DB_DUMP_TARGET: /mysql-state/target
+      DB_DUMP_FREQUENCY: ${MYSQL_DUMP_FREQUENCY_MINUTES:-720}
+      DB_DUMP_COMPRESSION: gzip
+      DB_DUMP_SAFECHARS: "true"
+      DB_DUMP_TRIGGERS: "true"
+      DB_DUMP_ROUTINES: "true"
+      DB_DUMP_RETENTION: ${MYSQL_DUMP_KEEP:-3}c
+      DB_DUMP_POST_BACKUP_SCRIPTS: /tmp/mysql-post-backup
+      MYSQL_DUMP_KEEP: ${MYSQL_DUMP_KEEP:-3}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mkdir -p /mysql-state/ready /mysql-state/target /tmp/mysql-post-backup
+        cat > /tmp/mysql-post-backup/publish.sh <<'HOOK'
+        #!/bin/sh
+        set -eu
+        keep=$${MYSQL_DUMP_KEEP:-3}
+        case "$$keep" in
+            ''|*[!0-9]*|0*) echo 'MYSQL_DUMP_KEEP must be a positive integer without leading zeros' >&2; exit 1 ;;
+        esac
+        ready=/mysql-state/ready
+        mkdir -p "$$ready"
+        staged=$$(mktemp /mysql-state/publish.XXXXXX)
+        trap 'rm -f "$$staged"' EXIT
+        cp "$${DUMPFILE:?mysql-backup must provide DUMPFILE}" "$$staged"
+        chmod 644 "$$staged"
+        mv "$$staged" "$$ready/$$(basename "$$DUMPFILE")"
+        find "$$ready" -maxdepth 1 -type f -name 'db_backup_*.tgz' |
+            sort -r | tail -n "+$$((keep + 1))" |
+            while IFS= read -r old; do
+                rm -f "$$old"
+            done
+        HOOK
+        chmod 700 /tmp/mysql-post-backup/publish.sh
+        exec /entrypoint dump
+    volumes:
+      - mysql_dumps:/mysql-state
+    healthcheck:
+      test: ["CMD-SHELL", "find /mysql-state/ready -maxdepth 1 -name 'db_backup_*.tgz' -type f | grep -q ."]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  mysql_dumps:

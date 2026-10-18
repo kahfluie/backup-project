@@ -269,7 +269,9 @@ On Linux/macOS, replace `.\sender.ps1` with `python3 sender-compose.py` in these
 
 ## Optional sender with host MySQL/MariaDB backups
 
-`compose.sender.mysql.yml` adds `databack/mysql-backup:1.5.0` alongside the sender. It connects to MySQL/MariaDB running on the Docker host, dumps immediately and then every 12 hours, and lets the sender archive the completed dumps under folder ID `mysql`. This is for MySQL/MariaDB. Microsoft SQL Server requires a different backup tool.
+For Portainer's web editor, use [the Portainer MySQL stack](#portainer-mysql-stack-local-backups) below. The launcher-based example in this section requires the project files on the Docker host.
+
+`compose.sender.mysql.yml` defines both the sender and `databack/mysql-backup:1.5.0` in one Compose file. It does not use `extends` or require `compose.sender.yml`. The database backup service connects to MySQL/MariaDB running on the Docker host, dumps immediately and then every 12 hours, and lets the sender archive the completed dumps under folder ID `mysql`. This is for MySQL/MariaDB. Microsoft SQL Server requires a different backup tool.
 
 The MySQL environment example uses `SEND_TO_REMOTE=false`, so sender archives stay in the `mysql` subdirectory of `LOCAL_BACKUP_PATH` (`./data/local-backups/mysql` by default). It needs no receiver, SSH keys, or `known_hosts`. The launcher removes the SSH secret mounts automatically. Pull the published sender image to get local-only support.
 
@@ -321,6 +323,26 @@ Completed dumps are gzip-compressed tar bundles containing one `.sql` file per d
 The dump and sender schedules run independently. A later database connection failure leaves earlier completed dumps available, so monitor `mysql-backup` logs for freshness; a healthy container indicates an existing completed dump. The receiver applies its default retention to `mysql` unless you add a `mysql` override in its retention configuration. To restore, extract a sender archive, extract the selected `db_backup_*.tgz` tar bundle, then import the SQL into a separate database for verification.
 
 The image settings follow the [upstream 1.5.0 configuration reference](https://github.com/databacker/mysql-backup/blob/v1.5.0/docs/configuration.md).
+
+### Portainer MySQL stack: local backups
+
+Paste the complete contents of [`compose.sender.mysql.portainer.yml`](compose.sender.mysql.portainer.yml) into a Portainer **Docker Standalone** stack's web editor. This example embeds the sender configuration and dump publication hook, so it requires no `extends`, project-file bind mounts, SSH files, or launcher. It uses the published images.
+
+Set the stack's environment variables using the database settings above and these folder settings:
+
+```dotenv
+SEND_TO_REMOTE=false
+FOLDER1_PATH=/usr/local/centovacast/var/vhosts
+FOLDER1_KEEP=1
+FOLDER1_INTERVAL_HOURS=24
+LOCAL_BACKUP_PATH=/data/local-backups
+```
+
+Keep your actual `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASES` in Portainer's environment settings. The source directory must exist on the Docker host. Sender archives appear under `/data/local-backups/folder1` and `/data/local-backups/mysql`. The MySQL service still uses `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DUMP_FREQUENCY_MINUTES`, and `MYSQL_DUMP_KEEP`; the sender uses `MYSQL_INTERVAL_HOURS` and `MYSQL_KEEP`.
+
+This stack includes `folder1` and MySQL only. Leave `FOLDER2_PATH=none` and `FOLDER3_PATH=none` if those variables are already present; they have no mounts or jobs in this variant. Upload bandwidth settings have no effect because this stack requires `SEND_TO_REMOTE=false`. To add another source folder, add its read-only mount, job in the embedded sender configuration, and environment overrides. For remote transfers, use the launcher-based example above.
+
+The error `bind source path does not exist: /data/compose/1/scripts/publish-mysql-dump.sh` comes from using the launcher-based file in a stack without that script on the Docker host. The relative JSON config and SSH mounts in that file also need host files, and `PATH=none` mounts are removed only by the launchers. Use the Portainer stack instead of creating placeholder files. See [Portainer's relative-path documentation](https://docs.portainer.io/advanced/relative-paths).
 
 ## Configuration details
 
