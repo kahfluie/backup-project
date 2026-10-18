@@ -269,15 +269,17 @@ On Linux/macOS, replace `.\sender.ps1` with `python3 sender-compose.py` in these
 
 ## Optional sender with host MySQL/MariaDB backups
 
-`compose.sender.mysql.yml` adds `databack/mysql-backup:1.5.0` alongside the sender. It connects to MySQL/MariaDB running on the Docker host, dumps immediately and then every 12 hours, and lets the sender archive/upload the completed dumps under folder ID `mysql`. This is for MySQL/MariaDB. Microsoft SQL Server requires a different backup tool.
+`compose.sender.mysql.yml` adds `databack/mysql-backup:1.5.0` alongside the sender. It connects to MySQL/MariaDB running on the Docker host, dumps immediately and then every 12 hours, and lets the sender archive the completed dumps under folder ID `mysql`. This is for MySQL/MariaDB. Microsoft SQL Server requires a different backup tool.
 
-Prepare the sender's SSH keys and verified `known_hosts` as described above, then run in PowerShell:
+The MySQL environment example uses `SEND_TO_REMOTE=false`, so sender archives stay in the `mysql` subdirectory of `LOCAL_BACKUP_PATH` (`./data/local-backups/mysql` by default). It needs no receiver, SSH keys, or `known_hosts`. The launcher removes the SSH secret mounts automatically. Pull the published sender image to get local-only support.
+
+PowerShell:
 
 ```powershell
 Copy-Item .env.sender.mysql.example .env.mysql
 Copy-Item config/sender.mysql.example.json config/sender.mysql.json
-# Edit .env.mysql with your database credentials and selected database names.
-# Set remote.host and remote.port in config/sender.mysql.json for the receiver.
+# Edit .env.mysql: set MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASES,
+# and LOCAL_BACKUP_PATH. Leave SEND_TO_REMOTE=false for local backups.
 .\sender.ps1 -EnvFile .env.mysql -ComposeFile compose.sender.mysql.yml pull
 .\sender.ps1 -EnvFile .env.mysql -ComposeFile compose.sender.mysql.yml up -d
 .\sender.ps1 -EnvFile .env.mysql -ComposeFile compose.sender.mysql.yml logs -f
@@ -288,23 +290,29 @@ Linux/macOS:
 ```sh
 cp .env.sender.mysql.example .env.mysql
 cp config/sender.mysql.example.json config/sender.mysql.json
-# Edit both files as described above before starting.
+# Edit .env.mysql with your database connection and local backup path.
+# Leave SEND_TO_REMOTE=false for local backups.
 python3 sender-compose.py --env-file .env.mysql --compose-file compose.sender.mysql.yml pull
 python3 sender-compose.py --env-file .env.mysql --compose-file compose.sender.mysql.yml up -d
+python3 sender-compose.py --env-file .env.mysql --compose-file compose.sender.mysql.yml logs -f
 ```
 
-Use these launcher options for subsequent commands so `FOLDERn_PATH=none` still removes unused source mounts. The MySQL environment example disables the three ordinary folders; set their paths to include normal folder backups too. This variant uses the same Compose project and local backup directory as the ordinary sender, so run one sender variant at a time.
+For remote copies, set `SEND_TO_REMOTE=true` in `.env.mysql`, configure `remote.host` and `remote.port` in `config/sender.mysql.json`, and prepare the receiver, sender SSH key, and verified `known_hosts` as described above. Include `mysql` in the receiver identity's allowed folders, then recreate the sender with the same launcher options and `up -d --force-recreate`. This enables uploads for all configured folders according to their JSON remote settings.
+
+Use these launcher options for subsequent commands so `FOLDERn_PATH=none` removes unused source mounts and `SEND_TO_REMOTE=false` omits SSH secrets. The MySQL environment example disables the three ordinary folders; set their paths to include normal folder backups too. This variant uses the same Compose project and local backup directory as the ordinary sender, so run one sender variant at a time.
 
 | Setting in `.env.mysql` | Default / purpose |
 | --- | --- |
+| `SEND_TO_REMOTE` | `false` in this example; set `true` to upload to a configured receiver |
+| `LOCAL_BACKUP_PATH` | `./data/local-backups`; MySQL sender archives appear in its `mysql` subdirectory |
 | `MYSQL_HOST`, `MYSQL_PORT` | `host.docker.internal`, `3306`; the host database address |
 | `MYSQL_USER`, `MYSQL_PASSWORD` | Your database backup account and password |
 | `MYSQL_DATABASES` | Comma-separated names; empty selects all non-system databases |
 | `MYSQL_DUMP_FREQUENCY_MINUTES` | `720`; SQL dump interval, starting immediately |
 | `MYSQL_DUMP_KEEP` | `3`; completed dump bundles retained in the shared Docker volume |
-| `MYSQL_INTERVAL_HOURS` | `12`; sender archive/upload interval for the `mysql` folder |
+| `MYSQL_INTERVAL_HOURS` | `12`; sender archive interval for the `mysql` folder, including uploads when enabled |
 | `MYSQL_KEEP` | `3`; local sender archives retained for `mysql` |
-| `MYSQL_BANDWIDTH_KIB_PER_SECOND` | `1024`; SQL archive upload limit |
+| `MYSQL_BANDWIDTH_KIB_PER_SECOND` | `1024`; SQL archive upload limit when remote transfer is enabled |
 
 The database must accept TCP connections from Docker, and the backup account must be allowed to connect from that source address with privileges to read the selected databases, routines, and triggers. `localhost` inside the backup container refers to that container. The supplied host-gateway mapping supports a database on the Docker host; change `MYSQL_HOST` for another server. Passwords containing `$` can be single-quoted in `.env.mysql` to prevent interpolation. Keep that file private; it is ignored by Git.
 
