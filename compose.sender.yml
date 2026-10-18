@@ -11,6 +11,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      SEND_TO_REMOTE: ${SEND_TO_REMOTE:-true}
       FOLDER1_PATH: ${FOLDER1_PATH:-./sample-data/folder1}
       FOLDER1_KEEP: ${FOLDER1_KEEP:-}
       FOLDER1_INTERVAL_HOURS: ${FOLDER1_INTERVAL_HOURS:-}

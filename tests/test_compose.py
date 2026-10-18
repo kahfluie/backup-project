@@ -40,6 +40,36 @@ class ComposeTests(unittest.TestCase):
         volumes = prepare_project(project)["services"]["sender"]["volumes"]
         self.assertTrue(all(not v["target"].startswith("/sources/") for v in volumes))
 
+    def test_local_only_omits_ssh_secrets_and_preserves_other_secrets(self):
+        project = self.project()
+        project["services"]["sender"]["environment"]["SEND_TO_REMOTE"] = " FALSE "
+        project["services"]["sender"]["secrets"] = [
+            {"source": "backup_key", "target": "/run/secrets/backup_key"}, "known_hosts", "other"]
+        project["secrets"] = {"backup_key": {"file": "/missing-key"},
+                              "known_hosts": {"file": "/missing-hosts"}, "other": {"file": "/other"}}
+        result = prepare_project(project)
+        self.assertEqual(result["services"]["sender"]["secrets"], ["other"])
+        self.assertEqual(result["secrets"], {"other": {"file": "/other"}})
+        self.assertEqual(len(project["secrets"]), 3)
+        self.assertEqual(len(result["services"]["sender"]["volumes"]), 3)
+
+        project["services"]["another"] = {"secrets": [{"source": "backup_key"}]}
+        self.assertIn("backup_key", prepare_project(project)["secrets"])
+
+    def test_remote_enabled_keeps_ssh_secrets_and_invalid_flag_fails(self):
+        project = self.project()
+        project["services"]["sender"]["secrets"] = ["backup_key", "known_hosts"]
+        project["secrets"] = {"backup_key": {"file": "/key"}, "known_hosts": {"file": "/hosts"}}
+        for value in ("", "true", " TRUE "):
+            with self.subTest(value=value):
+                project["services"]["sender"]["environment"]["SEND_TO_REMOTE"] = value
+                result = prepare_project(project)
+                self.assertEqual(result["services"]["sender"]["secrets"], ["backup_key", "known_hosts"])
+                self.assertEqual(result["secrets"], project["secrets"])
+        project["services"]["sender"]["environment"]["SEND_TO_REMOTE"] = "flase"
+        with self.assertRaisesRegex(ValueError, "SEND_TO_REMOTE must be true or false"):
+            prepare_project(project)
+
     def test_launcher_passes_filtered_spec_and_removes_temp_file(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary_paths = []

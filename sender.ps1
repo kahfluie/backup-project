@@ -30,6 +30,31 @@ foreach ($property in $project.services.sender.environment.PSObject.Properties) 
 $project.services.sender.volumes = @($project.services.sender.volumes | Where-Object {
     $_.target -cnotin $disabled
 })
+$sendToRemote = ([string]$project.services.sender.environment.SEND_TO_REMOTE).Trim().ToLowerInvariant()
+if ($sendToRemote -cnotin @('', 'true', 'false')) {
+    throw 'SEND_TO_REMOTE must be true or false'
+}
+if ($sendToRemote -ceq 'false') {
+    $sshSecrets = @('backup_key', 'known_hosts')
+    $project.services.sender | Add-Member -Force -NotePropertyName secrets -NotePropertyValue @(
+        $project.services.sender.secrets | Where-Object {
+            $name = if ($_ -is [string]) { $_ } else { $_.source }
+            $name -cnotin $sshSecrets
+        }
+    )
+    $usedSecrets = @(
+        foreach ($service in $project.services.PSObject.Properties.Value) {
+            foreach ($secret in $service.secrets) {
+                if ($secret -is [string]) { $secret } else { $secret.source }
+            }
+        }
+    )
+    foreach ($name in $sshSecrets) {
+        if ($name -cnotin $usedSecrets -and $null -ne $project.secrets) {
+            $project.secrets.PSObject.Properties.Remove($name)
+        }
+    }
+}
 $temporary = [System.IO.Path]::GetTempFileName()
 try {
     # Compose's rendered config already escapes literal dollar signs for reuse.

@@ -11,6 +11,13 @@ JOB_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 ARCHIVE = re.compile(r"backup-(\d{8}T\d{12}Z)-([a-f0-9]{12})\.tar\.gz\Z")
 
 
+def send_to_remote_enabled(environ):
+    value = environ.get("SEND_TO_REMOTE", "").strip().lower()
+    if value not in ("", "true", "false"):
+        raise ValueError("SEND_TO_REMOTE must be true or false")
+    return value != "false"
+
+
 def number(value, name, minimum=1, integer=False):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a number")

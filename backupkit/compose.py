@@ -1,4 +1,4 @@
-"""Launch Compose after removing disabled source bind mounts."""
+"""Launch Compose after removing disabled source mounts and unused SSH secrets."""
 
 import argparse
 from copy import deepcopy
@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 import tempfile
+
+from .common import send_to_remote_enabled
 
 
 def prepare_project(project):
@@ -20,6 +22,17 @@ def prepare_project(project):
             disabled.add(f"/sources/{match[1].lower()}")
     sender["volumes"] = [mount for mount in sender.get("volumes", [])
                          if mount["target"] not in disabled]
+    if not send_to_remote_enabled(sender.get("environment", {})):
+        ssh_secrets = {"backup_key", "known_hosts"}
+        def secret_name(secret):
+            return secret if isinstance(secret, str) else secret["source"]
+
+        sender["secrets"] = [secret for secret in sender.get("secrets", [])
+                             if secret_name(secret) not in ssh_secrets]
+        used = {secret_name(secret) for service in project["services"].values()
+                for secret in service.get("secrets", [])}
+        for name in ssh_secrets - used:
+            project.get("secrets", {}).pop(name, None)
     return project
 
 
@@ -40,7 +53,7 @@ def launch(arguments, root, env_file=None, command=("docker", "compose"), compos
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sender Compose launcher; omit mounts with FOLDERn_PATH=none")
+    parser = argparse.ArgumentParser(description="Sender Compose launcher; omit disabled folders and local-only SSH secrets")
     parser.add_argument("--env-file", help="Alternative .env file")
     parser.add_argument("--compose-file", default="compose.sender.yml", help="Sender Compose file, relative to the project")
     args, command = parser.parse_known_args()
@@ -51,7 +64,7 @@ def main():
     except subprocess.CalledProcessError as exc:
         print(exc.stderr or str(exc), file=sys.stderr)
         return exc.returncode
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

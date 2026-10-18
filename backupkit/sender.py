@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 
-from .common import ARCHIVE, LOG, identifier, locked, logging_setup, number, prune, read_json, write_json
+from .common import ARCHIVE, LOG, identifier, locked, logging_setup, number, prune, read_json, send_to_remote_enabled, write_json
 from .acceptance import manifest_for, matches_receipt
 
 
@@ -23,6 +23,7 @@ def apply_folder_environment(config, environ=None):
     """Compose supplies per-folder settings from .env; JSON remains the fallback."""
     environ = os.environ if environ is None else environ
     config = deepcopy(config)
+    send_remote = send_to_remote_enabled(environ)
     if not isinstance(config.get("folders"), list):
         raise ValueError("folders must be a list")
     active = []
@@ -31,6 +32,8 @@ def apply_folder_environment(config, environ=None):
         if environ.get(f"{prefix}_PATH", "").strip().lower() == "none":
             LOG.info("Skipping disabled folder %s", job["id"])
             continue
+        if not send_remote:
+            job["remote"] = False
         for suffix, key, convert in (("KEEP", "keep", int),
                                      ("INTERVAL_HOURS", "interval_hours", float),
                                      ("BANDWIDTH_KIB_PER_SECOND", "bandwidth_kib_per_second", float)):
@@ -252,6 +255,8 @@ def main():
     args = parser.parse_args()
     logging_setup()
     config = apply_folder_environment(read_json(args.config))
+    if not send_to_remote_enabled(os.environ):
+        LOG.info("SEND_TO_REMOTE=false; backups will be kept locally only")
     root, defaults, jobs = validate(config)
     if not jobs:
         LOG.info("No active folders; no backups will run")

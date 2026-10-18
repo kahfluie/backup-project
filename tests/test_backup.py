@@ -102,6 +102,50 @@ class BackupTests(unittest.TestCase):
             with self.subTest(variable=variable, value=value), self.assertRaises(ValueError):
                 sender.validate(sender.apply_folder_environment(self.config, {variable: value}))
 
+    def test_local_only_environment_overrides_folder_remote_and_retains_backups(self):
+        self.config["remote"] = {"enabled": True, "host": "-invalid-unused-host"}
+        self.config["folders"][0]["remote"] = {"enabled": True}
+        original = self.config
+        self.config = sender.apply_folder_environment(self.config, {
+            "SEND_TO_REMOTE": " FALSE ", "TEST_KEEP": "2",
+            "TEST_BANDWIDTH_KIB_PER_SECOND": "512"})
+        _, self.defaults, _ = sender.validate(self.config)
+        with patch.object(sender, "upload", side_effect=AssertionError("must not upload")):
+            for _ in range(4):
+                self.assertTrue(self.run_backup())
+        self.assertEqual(len(archives(self.backups / "test")), 2)
+        state = read_json(self.backups / "test" / "state.json")
+        self.assertNotIn("pending", state)
+        self.assertAlmostEqual(state["next_run"] - state["last_success"], 12 * 3600, places=2)
+        self.assertTrue(original["folders"][0]["remote"]["enabled"])
+
+    def test_send_to_remote_default_honors_json_and_rejects_invalid_values(self):
+        self.config["remote"] = {"enabled": True, "host": "example.com"}
+        for value in (None, "", " True "):
+            with self.subTest(value=value):
+                environ = {} if value is None else {"SEND_TO_REMOTE": value}
+                config = sender.apply_folder_environment(self.config, environ)
+                self.assertIsNotNone(sender.remote_for(config, config["folders"][0]))
+                config["folders"][0]["remote"] = False
+                config = sender.apply_folder_environment(config, environ)
+                self.assertIsNone(sender.remote_for(config, config["folders"][0]))
+        with self.assertRaisesRegex(ValueError, "SEND_TO_REMOTE must be true or false"):
+            sender.apply_folder_environment(self.config, {"SEND_TO_REMOTE": "flase"})
+
+    def test_switching_to_local_only_finishes_pending_archive_without_upload(self):
+        self.config["remote"] = {"enabled": True, "host": "example.com"}
+        with patch.object(sender, "upload", side_effect=RuntimeError("offline")):
+            with self.assertLogs("backupkit", level="ERROR"):
+                self.assertFalse(self.run_backup())
+        state_path = self.backups / "test" / "state.json"
+        pending = read_json(state_path)["pending"]
+        self.config = sender.apply_folder_environment(self.config, {"SEND_TO_REMOTE": "false"})
+        with patch.object(sender, "upload", side_effect=AssertionError("must not upload")):
+            with patch.object(sender, "create_archive", side_effect=AssertionError("must reuse pending")):
+                self.assertTrue(self.run_backup())
+        self.assertEqual(archives(state_path.parent)[0].name, pending)
+        self.assertNotIn("pending", read_json(state_path))
+
     def test_none_path_skips_only_disabled_folder_and_its_settings(self):
         config = {"folders": [
             {"id": "folder1", "path": str(self.source)},

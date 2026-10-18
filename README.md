@@ -1,11 +1,12 @@
 # Scheduled folder backups over SCP
 
-Two Docker containers: run the **sender** on the machine holding your folders and the **receiver** on the target server. The scripts use Python's standard library and OpenSSH.
+Run the **sender** on the machine holding your folders and the **receiver** on the target server, or run just the sender for local backups with `SEND_TO_REMOTE=false`. The scripts use Python's standard library and OpenSSH.
 
 | Setting | Default | Where to change it |
 | --- | --- | --- |
 | Backup interval | Every 12 hours per folder | `.env`: `FOLDER1_INTERVAL_HOURS`, etc.; JSON fallback: `interval_hours` |
 | Local retention | Last 3 backups per folder | `.env`: `FOLDER1_KEEP`, etc.; JSON fallback: `keep` |
+| Send to remote | Enabled | `.env`: `SEND_TO_REMOTE=false` keeps all backups locally |
 | Target retention | Last 3 backups per folder, plus all copies accepted in the last 7 days | Receiver `default_keep`, folder `keep`, and `minimum_retention_hours` |
 | Upload limit | 1024 KiB/s (1 MiB/s, roughly 8.4 Mbit/s) | `.env`: `FOLDER1_BANDWIDTH_KIB_PER_SECOND`, etc.; JSON fallback: `remote.bandwidth_kib_per_second` |
 | Target cleanup interval | Every 24 hours | Receiver `check_interval_hours` |
@@ -36,6 +37,20 @@ Copy-Item config/sender.example.json config/sender.json
 Copy-Item .env.example .env
 New-Item -ItemType Directory -Force secrets, data/local-backups | Out-Null
 ```
+
+### Keep backups locally only
+
+Set this in the sender's `.env` (or `.env.mysql` for the MySQL variant):
+
+```dotenv
+SEND_TO_REMOTE=false
+```
+
+Configure your source folders and `LOCAL_BACKUP_PATH` as described below, then use the sender launcher in [step 3](#3-start-the-sender). The launchers omit the SSH secret mounts in this mode, so you can skip SSH key generation, receiver setup, and host-key verification. Local archives, schedules, and retention still work. This setting disables uploads for every folder, including MySQL and folders with `remote.enabled=true` in JSON.
+
+When running these source changes before an updated image is published, build the sender with `docker build -t kahfluie/backupkit-sender:latest -f sender/Dockerfile .`, then start it without running `pull` over that local build.
+
+Set `SEND_TO_REMOTE=true` (the default) to allow uploads according to your JSON remote settings, then configure the receiver and SSH files before recreating the sender. The value accepts `true` or `false`, ignoring case and surrounding whitespace; an empty or omitted value uses the default. When switching to local backups, an archive pending from a failed upload is completed locally on its next run and becomes subject to local retention; it is not queued for a later upload.
 
 ### Generate and install the transfer SSH key
 
@@ -88,7 +103,7 @@ The sender authenticates with an SSH key. No transfer password needs to be set i
    docker compose -f compose.receiver.yml up -d --force-recreate
    ```
 
-Before starting the sender, the sender must have `secrets/backup_ed25519` and `secrets/known_hosts`, and the receiver must have `secrets/authorized_keys`. Compose mounts these files automatically. The private key does not go on the receiver.
+For remote transfers, the sender must have `secrets/backup_ed25519` and `secrets/known_hosts`, and the receiver must have `secrets/authorized_keys`. Compose mounts these files automatically. The private key does not go on the receiver.
 
 ### Select the source folders
 
@@ -113,7 +128,7 @@ Set any folder's path to `none` to skip it, as shown for folder 3 above. Use the
 
 To add a folder, add its mount, JSON entry, and environment settings following the existing examples. To re-enable a folder, replace `none` with its actual host path and recreate the sender.
 
-Edit `config/sender.json` and set `remote.host` to the target server's address. Configure the port and other connection settings as needed. Optional `.env` settings customize each folder's schedule and upload limit, such as `FOLDER1_INTERVAL_HOURS=12` and `FOLDER1_BANDWIDTH_KIB_PER_SECOND=1024`.
+For remote transfers, edit `config/sender.json` and set `remote.host` to the target server's address. Configure the port and other connection settings as needed. Optional `.env` settings customize each folder's schedule and upload limit, such as `FOLDER1_INTERVAL_HOURS=12` and `FOLDER1_BANDWIDTH_KIB_PER_SECOND=1024`.
 
 ## 2. Start the receiver on the target server
 
@@ -216,7 +231,7 @@ For port 22, use `backup.example.com` without brackets or a port suffix. Retriev
 
 ## 3. Start the sender
 
-Use the sender launcher for sender commands so folders with `PATH=none` have their mounts omitted. PowerShell needs only Docker and Compose; the cross-platform Python launcher also requires Python 3.12+ on the host. The receiver commands remain ordinary `docker compose` commands.
+Use the sender launcher for sender commands so folders with `PATH=none` have their mounts omitted and `SEND_TO_REMOTE=false` omits SSH secrets. PowerShell needs only Docker and Compose; the cross-platform Python launcher also requires Python 3.12+ on the host. The receiver commands remain ordinary `docker compose` commands.
 
 Windows PowerShell:
 
@@ -236,7 +251,7 @@ python3 sender-compose.py up -d
 python3 sender-compose.py logs -f
 ```
 
-The launchers accept Compose commands such as `up`, `stop`, `logs`, `run`, and `down`. To select another environment file, use `.\sender.ps1 -EnvFile .env.other up -d` or `python3 sender-compose.py --env-file .env.other up -d`. Calling the base `compose.sender.yml` directly does not remove disabled mounts.
+The launchers accept Compose commands such as `up`, `stop`, `logs`, `run`, and `down`. To select another environment file, use `.\sender.ps1 -EnvFile .env.other up -d` or `python3 sender-compose.py --env-file .env.other up -d`. Calling the base `compose.sender.yml` directly does not remove disabled mounts or SSH secrets.
 
 The first backup runs immediately. Each folder's next backup is due its configured interval after the previous successful backup/upload completes. Schedule state is persisted beside the local archives, so restarting the container preserves the schedule. Overdue folders run when the sender next starts. Jobs and uploads run sequentially, keeping transfers within one container's speed cap; a long-running job can delay other folders.
 
@@ -323,7 +338,7 @@ For the three supplied folders, nonempty `.env` keep, interval, and bandwidth se
 
 Environment variable names use the uppercase folder ID: `folder1` uses `FOLDER1_KEEP`, for example. If you change a folder ID, update the environment variable names passed through `compose.sender.yml` to match. The script reads environment variables supplied by Compose; when running Python directly, export these variables yourself.
 
-Sender `remote` settings apply to all folders. A folder can override individual remote settings using its own `remote` object, or set `"remote": false` to back up locally only. Set the global `remote.enabled` to `false` for an entirely local sender. The supplied Compose file still expects the SSH secret files to exist; remove its `secrets` entries and top-level `secrets` block if deploying without remote transfer.
+Sender `remote` settings apply to all folders. A folder can override individual remote settings using its own `remote` object, or set `"remote": false` to back up locally only. Set `SEND_TO_REMOTE=false` in the sender environment to disable all uploads and have the launchers omit SSH secrets automatically. The JSON-only alternative is global `remote.enabled=false` (unless a folder overrides it); SSH secret mounts are omitted automatically only with `SEND_TO_REMOTE=false`.
 
 `bandwidth_kib_per_second` accepts nonnegative numbers; `0` disables throttling. The limit applies to archive uploads. SSH setup and small directory/rename operations are not bandwidth limited. Different sender containers each have their own limit. Increase `transfer_timeout_seconds` for archives that need more than the default 24 hours to upload at your selected speed.
 
